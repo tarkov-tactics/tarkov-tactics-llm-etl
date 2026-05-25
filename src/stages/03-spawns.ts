@@ -112,8 +112,10 @@ export class SpawnClusterer {
     // Step 4: Cluster spatially
     let clusters = proximityCluster(spawnPoints, threshold);
 
-    // Step 5: Enforce cluster count constraints
-    clusters = enforceClusterLimits(clusters, config.min_clusters_per_map, config.max_clusters_per_map);
+    // Step 5: Enforce cluster count constraints (per-map override or global)
+    const maxClusters = (perMapOverride as Record<string, unknown>)?.max_clusters as number
+      ?? config.max_clusters_per_map;
+    clusters = enforceClusterLimits(clusters, config.min_clusters_per_map, maxClusters);
 
     console.log(`    Produced ${clusters.length} clusters (threshold: ${threshold}m)`);
 

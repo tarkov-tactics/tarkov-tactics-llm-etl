@@ -216,13 +216,15 @@ export class LootNormalizer {
   }
 
   private normalizeDistribution(distribution: SPTDistributionEntry[]): LootItem[] {
-    const totalWeight = distribution.reduce((sum, item) => sum + item.relativeProbability, 0);
+    // Filter to only items that exist in the tarkov.dev catalog
+    const matched = distribution.filter(item => this.itemIndex.has(item.tpl));
+    const totalWeight = matched.reduce((sum, item) => sum + item.relativeProbability, 0);
     if (totalWeight === 0) return [];
 
-    return distribution.map(item => ({
+    return matched.map(item => ({
       item_id: item.tpl,
       probability: item.relativeProbability / totalWeight,
-      confidence: (this.itemIndex.has(item.tpl) ? 'spt_direct' : 'id_unmatched') as LootConfidence,
+      confidence: 'spt_direct' as LootConfidence,
     }));
   }
 

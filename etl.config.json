@@ -5,7 +5,8 @@
     "min_clusters_per_map": 1,
     "per_map_overrides": {
       "factory": {
-        "proximity_threshold_m": 25
+        "proximity_threshold_m": 25,
+        "max_clusters": 3
       },
       "streets-of-tarkov": {
         "proximity_threshold_m": 150

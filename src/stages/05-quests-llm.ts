@@ -30,6 +30,7 @@ interface RawTask {
 export class QuestEnricher {
   private context: StageContext;
   private promptTemplate: string = '';
+  private itemNameToId: Map<string, string> = new Map();
 
   constructor(context: StageContext) {
     this.context = context;
@@ -37,6 +38,8 @@ export class QuestEnricher {
 
   async run(): Promise<QuestEnhancements> {
     console.log('📝 Stage 5: Quest enrichment...');
+
+    await this.loadItemIndex();
 
     const outputDir = join(this.context.workDir, 'stage5');
     await mkdir(outputDir, { recursive: true });
@@ -240,8 +243,8 @@ export class QuestEnricher {
       weapon_specific_item: llm.weapon_specific_item ?? null,
       weapon_class: typeof weaponClass === 'string' ? weaponClass : null,
       weapon_mods_required: llm.weapon_mods_required || [],
-      wearing_required: llm.wearing_required || [],
-      not_wearing: llm.not_wearing || [],
+      wearing_required: this.resolveToItemIds(llm.wearing_required || []),
+      not_wearing: this.resolveToItemIds(llm.not_wearing || []),
       distance_min_m: typeof llm.distance_min_m === 'number' ? llm.distance_min_m : null,
       distance_max_m: typeof llm.distance_max_m === 'number' ? llm.distance_max_m : null,
       time_of_day: typeof llm.time_of_day === 'string' ? llm.time_of_day : null,
@@ -249,6 +252,29 @@ export class QuestEnricher {
       health_state: typeof llm.health_state === 'string' ? llm.health_state : null,
       required_keys: llm.required_keys || [],
     };
+  }
+
+  private async loadItemIndex(): Promise<void> {
+    try {
+      const itemsPath = join(this.context.workDir, 'raw', 'tarkov-dev', 'items.json');
+      const content = await readFile(itemsPath, 'utf-8');
+      const items = JSON.parse(content) as Array<{ id: string; name: string; shortName: string }>;
+      for (const item of items) {
+        this.itemNameToId.set(item.name.toLowerCase(), item.id);
+        this.itemNameToId.set(item.shortName.toLowerCase(), item.id);
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  /**
+   * Resolve a list of item names/IDs to tarkov.dev item IDs.
+   * Values that already look like IDs (24-char hex) are kept as-is.
+   */
+  private resolveToItemIds(values: string[]): string[] {
+    return values.map(v => {
+      if (/^[a-f0-9]{24}$/.test(v)) return v;
+      return this.itemNameToId.get(v.toLowerCase()) || v;
+    });
   }
 
   private async loadPromptTemplate(): Promise<string> {
