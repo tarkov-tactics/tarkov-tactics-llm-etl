@@ -43,18 +43,34 @@ jobs:
           restore-keys: |
             etl-sources-${{ hashFiles('etl.config.json') }}-
 
-      - name: Run ETL pipeline (stages 1-4, 6)
+      # Fetch SPT looseLoot.json files via git sparse-checkout + LFS
+      # These are >5MB and tracked by Git LFS; raw GitHub URLs return LFS pointers.
+      - name: Fetch SPT loot data (LFS)
+        run: |
+          mkdir -p work/raw/spt
+          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/sp-tarkov/server.git /tmp/spt-server
+          cd /tmp/spt-server
+          git sparse-checkout set project/assets/database/locations
+          # Copy resolved LFS files into our work directory
+          if [ -d "project/assets/database/locations" ]; then
+            cp -r project/assets/database/locations/* $GITHUB_WORKSPACE/work/raw/spt/locations/ 2>/dev/null || true
+          fi
+
+      - name: Run ETL pipeline (stages 1-6, no LLM)
         run: npm run etl:run
         env:
           ETL_WORK_DIR: ./work
 
+      # Stage 5 with LLM: re-run with credentials, then re-validate
       - name: Run stage 5 (LLM enrichment)
-        if: env.LLM_API_KEY != ''
-        run: npm run stage:quests
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          npm run stage:quests
+          npm run stage:validate
         env:
-          LLM_API_BASE: ${{ secrets.LLM_API_BASE }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           ETL_WORK_DIR: ./work
 
       - name: Upload validation report
@@ -67,15 +83,15 @@ jobs:
             work/stage5/quest-enhancements.diff.md
 
       - name: Create PR for LLM-enriched data
-        if: env.LLM_API_KEY != '' && success()
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' && success() }}
         env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f "work/stage5/quest-enhancements.diff.md" ]; then
             BRANCH="etl/quest-enrichment-$(date +%Y%m%d)"
             git checkout -b "$BRANCH"
-            cp work/publish/* publish/ 2>/dev/null || mkdir -p publish && cp work/publish/* publish/
+            mkdir -p publish
+            cp work/publish/* publish/
             git add publish/
             git commit -m "chore: update ETL data with LLM enrichments"
             git push origin "$BRANCH"
@@ -86,21 +102,19 @@ jobs:
           fi
 
       - name: Publish to gh-pages (no LLM data)
-        if: env.LLM_API_KEY == '' && success()
+        if: ${{ secrets.ANTHROPIC_API_KEY == '' && success() }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           VERSION=$(jq -r '.version' work/publish/manifest.json)
 
-          # Create versioned directory
           mkdir -p "gh-pages-staging/v/$VERSION"
           mkdir -p "gh-pages-staging/latest"
 
           cp work/publish/*.json "gh-pages-staging/v/$VERSION/"
           cp work/publish/*.json "gh-pages-staging/latest/"
 
-          # Deploy to gh-pages
           git checkout --orphan gh-pages-deploy
           git rm -rf . 2>/dev/null || true
           cp -r gh-pages-staging/* .

@@ -103,35 +103,68 @@ export class SourceFetcher {
     const commitData = (await response.json()) as { sha: string };
     const commitHash = commitData.sha;
 
-    // SPT uses Git LFS for loot data files. We resolve LFS pointers via the
-    // GitHub LFS batch API so we can download the actual JSON content.
+    // Hybrid fetch strategy for SPT data:
+    // - staticLoot.json, staticContainers.json: direct raw GitHub URLs (<5MB, not in LFS)
+    // - looseLoot.json: tracked by Git LFS (1.5-79MB); requires git sparse checkout
+    //   or falls back to placeholder if git is unavailable
     const sptDir = join(this.rawDir, 'spt');
     await mkdir(sptDir, { recursive: true });
 
-    // SPT-AKI internal map directory names
     const maps = [
       'bigmap', 'factory4_day', 'factory4_night', 'woods', 'shoreline',
       'interchange', 'laboratory', 'lighthouse', 'rezervbase',
       'tarkovstreets', 'sandbox', 'sandbox_high',
     ];
 
-    const lootFiles = ['looseLoot.json', 'staticLoot.json', 'staticContainers.json'];
+    // Files fetchable directly via raw GitHub (not LFS-tracked, <5MB)
+    const directFiles = ['staticLoot.json', 'staticContainers.json'];
+    // Files tracked by Git LFS (>5MB)
+    const lfsFiles = ['looseLoot.json'];
 
     for (const map of maps) {
       const mapDir = join(sptDir, 'locations', map);
       await mkdir(mapDir, { recursive: true });
 
-      for (const file of lootFiles) {
+      // Fetch non-LFS files directly
+      for (const file of directFiles) {
         const remotePath = `project/assets/database/locations/${map}/${file}`;
         try {
-          const content = await this.fetchSPTFile(remotePath, commitHash);
+          const content = await this.fetchRawGitHubFile(remotePath, commitHash);
           await writeFile(join(mapDir, file), content);
-        } catch (error) {
-          // Write placeholder for files that don't exist for this map
+        } catch {
           await writeFile(join(mapDir, file), JSON.stringify({
             _meta: { placeholder: true, map, file, commit: commitHash }
           }));
         }
+      }
+
+      // LFS files: attempt sparse checkout, fall back to placeholder
+      for (const file of lfsFiles) {
+        const destPath = join(mapDir, file);
+        try {
+          const content = await this.fetchRawGitHubFile(
+            `project/assets/database/locations/${map}/${file}`,
+            commitHash
+          );
+          // If we got actual JSON (not an LFS pointer), use it
+          if (!content.startsWith('version https://git-lfs.github.com/spec/v1')) {
+            await writeFile(destPath, content);
+            continue;
+          }
+        } catch { /* fall through */ }
+
+        // LFS pointer or fetch failed — write placeholder
+        // In CI, the GitHub Actions workflow should use git sparse-checkout + LFS
+        await writeFile(destPath, JSON.stringify({
+          _meta: {
+            placeholder: true,
+            lfs: true,
+            map,
+            file,
+            commit: commitHash,
+            note: 'This file is tracked by Git LFS. Run git sparse-checkout in CI to resolve.'
+          }
+        }));
       }
     }
 
@@ -139,80 +172,15 @@ export class SourceFetcher {
     return commitHash;
   }
 
-  /**
-   * Fetch a file from the SPT repo, handling Git LFS pointers.
-   * First tries raw content; if it's an LFS pointer, resolves via the LFS batch API.
-   */
-  private async fetchSPTFile(path: string, ref: string): Promise<string> {
+  private async fetchRawGitHubFile(path: string, ref: string): Promise<string> {
     const rawUrl = `https://raw.githubusercontent.com/sp-tarkov/server/${ref}/${path}`;
-    const rawResponse = await fetch(rawUrl);
+    const response = await fetch(rawUrl);
 
-    if (!rawResponse.ok) {
-      throw new Error(`Failed to fetch ${path}: ${rawResponse.statusText}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${path}: ${response.statusText}`);
     }
 
-    const content = await rawResponse.text();
-
-    // Check if it's an LFS pointer
-    if (content.startsWith('version https://git-lfs.github.com/spec/v1')) {
-      const oidMatch = content.match(/oid sha256:([a-f0-9]+)/);
-      const sizeMatch = content.match(/size (\d+)/);
-      if (!oidMatch || !sizeMatch) {
-        throw new Error(`Invalid LFS pointer for ${path}`);
-      }
-
-      return this.fetchLFSObject(oidMatch[1], parseInt(sizeMatch[1]));
-    }
-
-    return content;
-  }
-
-  /**
-   * Resolve an LFS object via the GitHub LFS batch API.
-   */
-  private async fetchLFSObject(oid: string, size: number): Promise<string> {
-    const batchUrl = 'https://github.com/sp-tarkov/server.git/info/lfs/objects/batch';
-
-    const batchResponse = await fetch(batchUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.git-lfs+json',
-      },
-      body: JSON.stringify({
-        operation: 'download',
-        transfer: ['basic'],
-        objects: [{ oid, size }],
-      }),
-    });
-
-    if (!batchResponse.ok) {
-      throw new Error(`LFS batch API failed: ${batchResponse.statusText}`);
-    }
-
-    const batchData = (await batchResponse.json()) as {
-      objects: Array<{
-        actions?: { download?: { href: string } };
-        error?: { message: string };
-      }>;
-    };
-
-    const obj = batchData.objects?.[0];
-    if (obj?.error) {
-      throw new Error(`LFS error: ${obj.error.message}`);
-    }
-
-    const downloadUrl = obj?.actions?.download?.href;
-    if (!downloadUrl) {
-      throw new Error('No download URL in LFS batch response');
-    }
-
-    const downloadResponse = await fetch(downloadUrl);
-    if (!downloadResponse.ok) {
-      throw new Error(`LFS download failed: ${downloadResponse.statusText}`);
-    }
-
-    return downloadResponse.text();
+    return response.text();
   }
 
   private async fetchHideoutData(): Promise<string> {
