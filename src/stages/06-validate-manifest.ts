@@ -12,6 +12,7 @@ import {
   QuestEnhancements,
   StageContext,
 } from '../lib/types.js';
+import { initializeSchemas, schemaValidator } from '../lib/schema-validator.js';
 
 interface ValidationIssue {
   severity: 'error' | 'warning';
@@ -29,6 +30,9 @@ export class Validator {
 
   async run(): Promise<Manifest> {
     console.log('🔍 Stage 6: Validating and generating manifest...');
+
+    // Initialize JSON schemas for AJV validation (per brief §10 step 1)
+    await initializeSchemas();
 
     const outputDir = join(this.context.workDir, 'publish');
     await mkdir(outputDir, { recursive: true });
@@ -48,10 +52,30 @@ export class Validator {
     const mapIds = new Set(maps?.map(m => m.id) || []);
     const taskIds = new Set(tasks?.map(t => t.id) || []);
 
-    // Run validations
+    // Run cross-reference validations
     if (lootProbs) this.validateLootProbabilities(lootProbs, itemIds, mapIds);
     if (spawnClusters) this.validateSpawnClusters(spawnClusters, mapIds);
     if (questEnhancements) this.validateQuestEnhancements(questEnhancements, taskIds);
+
+    // Run AJV schema validation on every output file (per brief §10 step 1)
+    const schemaFiles = [
+      { stageDir: 'stage2', fileName: 'loot-probabilities.json', schemaName: 'loot-probabilities' },
+      { stageDir: 'stage3', fileName: 'spawn-clusters.json', schemaName: 'spawn-clusters' },
+      { stageDir: 'stage4', fileName: 'named-pois.json', schemaName: 'named-pois' },
+      { stageDir: 'stage5', fileName: 'quest-enhancements.json', schemaName: 'quest-enhancements' },
+    ];
+
+    for (const sf of schemaFiles) {
+      const filePath = join(this.context.workDir, sf.stageDir, sf.fileName);
+      const result = await schemaValidator.validateFile(sf.schemaName, filePath);
+      if (!result.valid) {
+        this.issues.push({
+          severity: 'error',
+          stage: 'schema',
+          message: `${sf.fileName} failed schema validation: ${result.errors?.join('; ')}`,
+        });
+      }
+    }
 
     // Copy validated files to publish directory
     const publishFiles: ManifestFile[] = [];
@@ -179,7 +203,7 @@ export class Validator {
     for (const [mapId, mapData] of Object.entries(loot.maps)) {
       if (!mapIds.has(mapId)) {
         this.issues.push({
-          severity: 'warning',
+          severity: 'error',
           stage: 'loot',
           message: `Map ID "${mapId}" not found in tarkov.dev catalog`,
         });

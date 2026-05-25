@@ -3,12 +3,8 @@
 
 import { writeFile, mkdir, readFile, access } from 'fs/promises';
 import { join } from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { TarkovDevClient } from '../lib/tarkov-dev-client.js';
 import { StageContext, SourceVersions } from '../lib/types.js';
-
-const execAsync = promisify(exec);
 
 export class SourceFetcher {
   private context: StageContext;
@@ -24,25 +20,17 @@ export class SourceFetcher {
   async run(): Promise<SourceVersions> {
     await this.ensureDirectories();
 
-    // Check cache validity first
     const cachedVersions = await this.loadCachedVersions();
-    const currentVersions = await this.getCurrentVersions();
-
-    if (this.isCacheValid(cachedVersions, currentVersions)) {
-      console.log('✓ All source data is up to date, skipping fetch');
-      return cachedVersions;
-    }
 
     console.log('📦 Fetching source data...');
 
-    // Fetch all sources
     const versions: SourceVersions = {};
 
-    // 1. Fetch tarkov.dev GraphQL data
-    const tarkovDevEtag = await this.fetchTarkovDevData();
-    versions.tarkov_dev_etag = tarkovDevEtag;
+    // 1. Fetch tarkov.dev GraphQL data (single batched request per brief §4.1)
+    const queryTime = await this.fetchTarkovDevData();
+    versions.tarkov_dev_etag = queryTime;
 
-    // 2. Fetch SPT-AKI data (commit hash)
+    // 2. Fetch SPT-AKI data
     const sptCommit = await this.fetchSPTData();
     versions.spt_aki_commit = sptCommit;
 
@@ -50,9 +38,15 @@ export class SourceFetcher {
     const hideoutCommit = await this.fetchHideoutData();
     versions.the_hideout_commit = hideoutCommit;
 
-    // Save version metadata
-    await this.saveVersions(versions);
+    // Check if anything changed
+    if (
+      cachedVersions.spt_aki_commit === versions.spt_aki_commit &&
+      cachedVersions.the_hideout_commit === versions.the_hideout_commit
+    ) {
+      console.log('✓ No source changes detected since last run');
+    }
 
+    await this.saveVersions(versions);
     console.log('✓ Source fetch completed');
     return versions;
   }
@@ -71,36 +65,33 @@ export class SourceFetcher {
   }
 
   private async fetchTarkovDevData(): Promise<string> {
-    console.log('  Fetching tarkov.dev data...');
+    console.log('  Fetching tarkov.dev data (single batched query)...');
 
-    const maps = await this.tarkovDevClient.getAllMaps();
-    const items = await this.tarkovDevClient.getAllItems();
-    const tasks = await this.tarkovDevClient.getAllTasks();
+    const data = await this.tarkovDevClient.fetchAll();
+    const queryTime = new Date().toISOString();
 
     await writeFile(
       join(this.rawDir, 'tarkov-dev', 'maps.json'),
-      JSON.stringify(maps, null, 2)
+      JSON.stringify(data.maps, null, 2)
     );
 
     await writeFile(
       join(this.rawDir, 'tarkov-dev', 'items.json'),
-      JSON.stringify(items, null, 2)
+      JSON.stringify(data.items, null, 2)
     );
 
     await writeFile(
       join(this.rawDir, 'tarkov-dev', 'tasks.json'),
-      JSON.stringify(tasks, null, 2)
+      JSON.stringify(data.tasks, null, 2)
     );
 
-    // Generate a simple etag based on data timestamp
-    const timestamp = new Date().toISOString();
-    return `"${Date.now()}"`;
+    console.log(`    ${data.maps.length} maps, ${data.items.length} items, ${data.tasks.length} tasks`);
+    return queryTime;
   }
 
   private async fetchSPTData(): Promise<string> {
     console.log('  Fetching SPT-AKI data...');
 
-    // Get latest commit hash from GitHub API
     const response = await fetch(
       'https://api.github.com/repos/sp-tarkov/server/commits/master'
     );
@@ -112,44 +103,121 @@ export class SourceFetcher {
     const commitData = (await response.json()) as { sha: string };
     const commitHash = commitData.sha;
 
-    // For now, we'll create placeholder SPT data since the actual files use Git LFS
-    // In a real implementation, we'd need to handle Git LFS properly
+    // SPT uses Git LFS for loot data files. We resolve LFS pointers via the
+    // GitHub LFS batch API so we can download the actual JSON content.
     const sptDir = join(this.rawDir, 'spt');
     await mkdir(sptDir, { recursive: true });
 
-    // Create placeholder structure based on what we know from the API
-    // Use the actual SPT-AKI directory naming convention
-    const maps = ['bigmap', 'factory4_day', 'factory4_night', 'woods', 'shoreline', 'interchange', 'laboratory', 'lighthouse', 'rezervbase', 'tarkovstreets', 'sandbox', 'sandbox_high'];
+    // SPT-AKI internal map directory names
+    const maps = [
+      'bigmap', 'factory4_day', 'factory4_night', 'woods', 'shoreline',
+      'interchange', 'laboratory', 'lighthouse', 'rezervbase',
+      'tarkovstreets', 'sandbox', 'sandbox_high',
+    ];
+
+    const lootFiles = ['looseLoot.json', 'staticLoot.json', 'staticContainers.json'];
 
     for (const map of maps) {
       const mapDir = join(sptDir, 'locations', map);
       await mkdir(mapDir, { recursive: true });
 
-      // Create placeholder loot data
-      const placeholderLoot = {
-        looseLoot: [],
-        staticLoot: [],
-        staticContainers: [],
-        _meta: {
-          note: 'Placeholder - real implementation would fetch from SPT Git LFS',
-          commit: commitHash,
-          map: map
+      for (const file of lootFiles) {
+        const remotePath = `project/assets/database/locations/${map}/${file}`;
+        try {
+          const content = await this.fetchSPTFile(remotePath, commitHash);
+          await writeFile(join(mapDir, file), content);
+        } catch (error) {
+          // Write placeholder for files that don't exist for this map
+          await writeFile(join(mapDir, file), JSON.stringify({
+            _meta: { placeholder: true, map, file, commit: commitHash }
+          }));
         }
-      };
-
-      await writeFile(
-        join(mapDir, 'looseLoot.json'),
-        JSON.stringify(placeholderLoot, null, 2)
-      );
+      }
     }
 
+    console.log(`    Commit: ${commitHash.slice(0, 8)}`);
     return commitHash;
+  }
+
+  /**
+   * Fetch a file from the SPT repo, handling Git LFS pointers.
+   * First tries raw content; if it's an LFS pointer, resolves via the LFS batch API.
+   */
+  private async fetchSPTFile(path: string, ref: string): Promise<string> {
+    const rawUrl = `https://raw.githubusercontent.com/sp-tarkov/server/${ref}/${path}`;
+    const rawResponse = await fetch(rawUrl);
+
+    if (!rawResponse.ok) {
+      throw new Error(`Failed to fetch ${path}: ${rawResponse.statusText}`);
+    }
+
+    const content = await rawResponse.text();
+
+    // Check if it's an LFS pointer
+    if (content.startsWith('version https://git-lfs.github.com/spec/v1')) {
+      const oidMatch = content.match(/oid sha256:([a-f0-9]+)/);
+      const sizeMatch = content.match(/size (\d+)/);
+      if (!oidMatch || !sizeMatch) {
+        throw new Error(`Invalid LFS pointer for ${path}`);
+      }
+
+      return this.fetchLFSObject(oidMatch[1], parseInt(sizeMatch[1]));
+    }
+
+    return content;
+  }
+
+  /**
+   * Resolve an LFS object via the GitHub LFS batch API.
+   */
+  private async fetchLFSObject(oid: string, size: number): Promise<string> {
+    const batchUrl = 'https://github.com/sp-tarkov/server.git/info/lfs/objects/batch';
+
+    const batchResponse = await fetch(batchUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/vnd.git-lfs+json',
+      },
+      body: JSON.stringify({
+        operation: 'download',
+        transfer: ['basic'],
+        objects: [{ oid, size }],
+      }),
+    });
+
+    if (!batchResponse.ok) {
+      throw new Error(`LFS batch API failed: ${batchResponse.statusText}`);
+    }
+
+    const batchData = (await batchResponse.json()) as {
+      objects: Array<{
+        actions?: { download?: { href: string } };
+        error?: { message: string };
+      }>;
+    };
+
+    const obj = batchData.objects?.[0];
+    if (obj?.error) {
+      throw new Error(`LFS error: ${obj.error.message}`);
+    }
+
+    const downloadUrl = obj?.actions?.download?.href;
+    if (!downloadUrl) {
+      throw new Error('No download URL in LFS batch response');
+    }
+
+    const downloadResponse = await fetch(downloadUrl);
+    if (!downloadResponse.ok) {
+      throw new Error(`LFS download failed: ${downloadResponse.statusText}`);
+    }
+
+    return downloadResponse.text();
   }
 
   private async fetchHideoutData(): Promise<string> {
     console.log('  Fetching the-hideout iconic location data...');
 
-    // Get latest commit hash
     const response = await fetch(
       'https://api.github.com/repos/the-hideout/tarkov-dev/commits/main'
     );
@@ -161,34 +229,15 @@ export class SourceFetcher {
     const commitData = (await response.json()) as { sha: string };
     const commitHash = commitData.sha;
 
-    // For now, create placeholder iconic location data
-    // Real implementation would find the actual iconic location files
+    // The-hideout/tarkov-dev is a React app; iconic location data may be embedded
+    // in its source. For now, we use the tarkov.dev API data (lootContainers,
+    // extracts, switches) as our primary named-position source per spec §8.5.
+    // Community iconic labels are a secondary source; placeholder until we locate
+    // the exact file in the repo.
     const iconicLocations = {
-      customs: [
-        {
-          name: "Dorms",
-          center: { x: -100, y: 0, z: 100 },
-          layer_range_y: [0, 20],
-          source: "the-hideout/tarkov-dev"
-        },
-        {
-          name: "Big Red",
-          center: { x: 200, y: 0, z: -150 },
-          layer_range_y: [0, 15],
-          source: "the-hideout/tarkov-dev"
-        }
-      ],
-      factory: [
-        {
-          name: "Office",
-          center: { x: 0, y: 5, z: 0 },
-          layer_range_y: [0, 10],
-          source: "the-hideout/tarkov-dev"
-        }
-      ],
       _meta: {
-        note: 'Placeholder - real implementation would fetch actual iconic location data',
-        commit: commitHash
+        commit: commitHash,
+        note: 'Iconic location labels — to be populated from actual the-hideout data source'
       }
     };
 
@@ -197,13 +246,8 @@ export class SourceFetcher {
       JSON.stringify(iconicLocations, null, 2)
     );
 
+    console.log(`    Commit: ${commitHash.slice(0, 8)}`);
     return commitHash;
-  }
-
-  private async getCurrentVersions(): Promise<SourceVersions> {
-    // This would check current versions of all sources
-    // For now, return empty to force fresh fetch
-    return {};
   }
 
   private async loadCachedVersions(): Promise<SourceVersions> {
@@ -221,15 +265,8 @@ export class SourceFetcher {
     const versionsPath = join(this.rawDir, 'source-versions.json');
     await writeFile(versionsPath, JSON.stringify(versions, null, 2));
   }
-
-  private isCacheValid(cached: SourceVersions, current: SourceVersions): boolean {
-    // For now, always fetch fresh data
-    // Real implementation would check timestamps and TTL
-    return false;
-  }
 }
 
-// CLI entry point
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { loadConfig } = await import('../lib/config.js');
   const config = await loadConfig();

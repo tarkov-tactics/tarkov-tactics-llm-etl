@@ -41,52 +41,68 @@ export class TarkovDevClient {
     return result.data;
   }
 
-  async getAllMaps() {
+  /**
+   * Fetch all data in a single batched GraphQL request to minimize round-trips.
+   * Per brief §4.1: "the fetch must batch related queries to minimize round-trips"
+   */
+  async fetchAll() {
     const query = `
-      query GetMaps($lang: LanguageCode) {
+      query FetchAll($lang: LanguageCode) {
         maps(lang: $lang) {
           id
           name
+          normalizedName
+          raidDuration
           spawns {
+            zoneName
             categories
             sides
-            position {
-              x
-              y
-              z
-            }
+            position { x y z }
+          }
+          extracts {
+            id
+            name
+            faction
+            position { x y z }
+          }
+          locks {
+            lockType
+            key { id name }
+            needsPower
+            position { x y z }
+          }
+          switches {
+            id
+            name
+            position { x y z }
+          }
+          bosses {
+            boss { id name }
+            spawnChance
+            spawnLocations { name chance }
+          }
+          lootContainers {
+            lootContainer { id name normalizedName }
+            position { x y z }
           }
         }
-      }
-    `;
-
-    interface MapsResponse {
-      maps: Array<{
-        id: string;
-        name: string;
-        spawns: Array<{
-          categories: string[];
-          sides: string[];
-          position: { x: number; y: number; z: number };
-        }>;
-      }>;
-    }
-
-    const result = await this.query<MapsResponse>(query, { lang: 'en' });
-    return result.maps;
-  }
-
-  async getAllItems() {
-    const query = `
-      query GetItems($lang: LanguageCode) {
         items(lang: $lang) {
           id
           name
           shortName
+          types
+          width
+          height
+          properties {
+            ... on ItemPropertiesKey {
+              uses
+            }
+          }
           buyFor {
             source
             price
             currency
+            requirements { type value }
           }
           sellFor {
             source
@@ -94,67 +110,112 @@ export class TarkovDevClient {
             currency
           }
         }
-      }
-    `;
-
-    interface ItemsResponse {
-      items: Array<{
-        id: string;
-        name: string;
-        shortName: string;
-        buyFor?: Array<{
-          source: string;
-          price: number;
-          currency: string;
-        }>;
-        sellFor?: Array<{
-          source: string;
-          price: number;
-          currency: string;
-        }>;
-      }>;
-    }
-
-    const result = await this.query<ItemsResponse>(query, { lang: 'en' });
-    return result.items;
-  }
-
-  async getAllTasks() {
-    const query = `
-      query GetTasks($lang: LanguageCode) {
         tasks(lang: $lang) {
           id
           name
+          map { id name }
           objectives {
             id
             type
             description
-            maps {
-              id
-              name
-            }
+            optional
+            maps { id name }
+          }
+          taskRequirements {
+            task { id }
           }
         }
       }
     `;
 
-    interface TasksResponse {
-      tasks: Array<{
-        id: string;
-        name: string;
-        objectives: Array<{
-          id: string;
-          type: string;
-          description: string;
-          maps?: Array<{
-            id: string;
-            name: string;
-          }>;
-        }>;
-      }>;
-    }
-
-    const result = await this.query<TasksResponse>(query, { lang: 'en' });
-    return result.tasks;
+    const result = await this.query<{
+      maps: TarkovDevMapRaw[];
+      items: TarkovDevItemRaw[];
+      tasks: TarkovDevTaskRaw[];
+    }>(query, { lang: 'en' });
+    return result;
   }
+}
+
+// Raw API response types
+
+export interface TarkovDevMapRaw {
+  id: string;
+  name: string;
+  normalizedName: string;
+  raidDuration: number | null;
+  spawns: Array<{
+    zoneName: string;
+    categories: string[];
+    sides: string[];
+    position: { x: number; y: number; z: number };
+  }>;
+  extracts: Array<{
+    id: string;
+    name: string;
+    faction: string | null;
+    position: { x: number; y: number; z: number } | null;
+  }>;
+  locks: Array<{
+    lockType: string;
+    key: { id: string; name: string } | null;
+    needsPower: boolean;
+    position: { x: number; y: number; z: number } | null;
+  }>;
+  switches: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number; z: number } | null;
+  }>;
+  bosses: Array<{
+    boss: { id: string; name: string };
+    spawnChance: number;
+    spawnLocations: Array<{
+      name: string;
+      chance: number;
+    }>;
+  }>;
+  lootContainers: Array<{
+    lootContainer: { id: string; name: string; normalizedName: string };
+    position: { x: number; y: number; z: number };
+  }>;
+}
+
+export interface TarkovDevItemRaw {
+  id: string;
+  name: string;
+  shortName: string;
+  types: string[];
+  width: number;
+  height: number;
+  properties: {
+    uses?: number;
+  } | null;
+  buyFor: Array<{
+    source: string;
+    price: number;
+    currency: string;
+    requirements: Array<{ type: string; value: number }>;
+  }>;
+  sellFor: Array<{
+    source: string;
+    price: number;
+    currency: string;
+  }>;
+}
+
+export interface TarkovDevTaskRaw {
+  id: string;
+  name: string;
+  map: { id: string; name: string } | null;
+  objectives: Array<{
+    id: string;
+    type: string;
+    description: string;
+    optional: boolean;
+    maps: Array<{ id: string; name: string }> | null;
+  }>;
+  taskRequirements: Array<{
+    task: { id: string };
+  }>;
 }

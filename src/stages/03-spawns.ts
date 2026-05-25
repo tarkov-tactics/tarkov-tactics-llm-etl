@@ -7,10 +7,10 @@ import { SpawnClusters, SpawnCluster, Position, StageContext } from '../lib/type
 import { proximityCluster, enforceClusterLimits, ClusterablePoint } from '../lib/clustering.js';
 
 interface RawSpawn {
+  zoneName: string;
   categories: string[];
   sides: string[];
   position: Position;
-  zoneName?: string;
 }
 
 interface SpawnPoint extends ClusterablePoint {

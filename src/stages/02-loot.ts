@@ -6,56 +6,38 @@ import { join } from 'path';
 import { LootProbabilities, LootItem, LootConfidence, Position, StageContext } from '../lib/types.js';
 
 // SPT-AKI raw data structures
-interface SPTLooseLootPoint {
-  template: string;
-  position: { x: number; y: number; z: number };
-  itemDistribution: Array<{ tpl: string; relativeProbability: number }>;
-}
-
-interface SPTLooseLootData {
-  spawnpoints?: SPTLooseLootPoint[];
-  spawnpointsForced?: SPTLooseLootPoint[];
-  looseLoot?: SPTLooseLootPoint[];
-  _meta?: Record<string, unknown>;
-}
-
-interface SPTStaticLootItem {
+interface SPTDistributionEntry {
   tpl: string;
   relativeProbability: number;
 }
 
-interface SPTStaticContainer {
-  containerId?: string;
-  containerTypeId?: string;
-  items?: SPTStaticLootItem[];
-  itemDistribution?: SPTStaticLootItem[];
-}
-
-interface SPTStaticLootData {
-  staticContainers?: SPTStaticContainer[];
-  staticLoot?: Record<string, { itemDistribution?: SPTStaticLootItem[] }>;
-  _meta?: Record<string, unknown>;
+interface SPTLooseLootPoint {
+  template: string;
+  position: { x: number; y: number; z: number };
+  itemDistribution: SPTDistributionEntry[];
 }
 
 // Map of known SPT internal map directory names to tarkov.dev IDs
 const SPT_MAP_ID_MAP: Record<string, string> = {
-  bigmap: '56f40101d2720b2a4d8b45d6',        // Customs
-  factory4_day: '55f2d3fd4bdc2d5f408b4567',   // Factory (Day)
-  factory4_night: '59fc81d786f774390775787e',  // Factory (Night)
-  interchange: '5714dbc024597771384a510d',      // Interchange
-  laboratory: '5b0fc42d86f7744a585f9105',       // The Lab
-  lighthouse: '5704e4dad2720bb55b8b4567',       // Lighthouse
-  rezervbase: '5704e5fad2720bc05b8b4567',       // Reserve
-  shoreline: '5704e554d2720bac5b8b456e',        // Shoreline
-  tarkovstreets: '653e6760052c01c1c805532f',    // Streets of Tarkov
-  woods: '5704e3c2d2720bac5b8b4567',            // Woods
-  sandbox: '65b8d6f5cdde2479cb2a3125',          // Ground Zero
-  sandbox_high: '65b8d6f5cdde2479cb2a3125',     // Ground Zero (High level)
+  bigmap: '56f40101d2720b2a4d8b45d6',
+  factory4_day: '55f2d3fd4bdc2d5f408b4567',
+  factory4_night: '59fc81d786f774390775787e',
+  interchange: '5714dbc024597771384a510d',
+  laboratory: '5b0fc42d86f7744a585f9105',
+  lighthouse: '5704e4dad2720bb55b8b4567',
+  rezervbase: '5704e5fad2720bc05b8b4567',
+  shoreline: '5704e554d2720bac5b8b456e',
+  tarkovstreets: '653e6760052c01c1c805532f',
+  woods: '5704e3c2d2720bac5b8b4567',
+  sandbox: '653e6760052c01c1c805532f',
+  sandbox_high: '65b8d6f5cdde2479cb2a3125',
 };
 
 export class LootNormalizer {
   private context: StageContext;
-  private itemIndex: Map<string, string> = new Map(); // BSG tpl -> tarkov.dev ID
+  private itemIndex: Set<string> = new Set();
+  // Loot container types from tarkov.dev, keyed by map ID
+  private mapContainerTypes: Map<string, Set<string>> = new Map();
 
   constructor(context: StageContext) {
     this.context = context;
@@ -65,6 +47,7 @@ export class LootNormalizer {
     console.log('📊 Stage 2: Normalizing loot probabilities...');
 
     await this.loadItemIndex();
+    await this.loadMapContainerTypes();
 
     const rawDir = join(this.context.workDir, 'raw');
     const outputDir = join(this.context.workDir, 'stage2');
@@ -77,7 +60,6 @@ export class LootNormalizer {
       maps: {},
     };
 
-    // Process each map's loot data
     const sptLocationsDir = join(rawDir, 'spt', 'locations');
     let mapDirs: string[];
     try {
@@ -97,7 +79,6 @@ export class LootNormalizer {
       }
     }
 
-    // Write output
     const outputPath = join(outputDir, 'loot-probabilities.json');
     await writeFile(outputPath, JSON.stringify(result, null, 2));
     console.log('✓ Stage 2 completed');
@@ -109,16 +90,36 @@ export class LootNormalizer {
     try {
       const itemsPath = join(this.context.workDir, 'raw', 'tarkov-dev', 'items.json');
       const content = await readFile(itemsPath, 'utf-8');
-      const items = JSON.parse(content) as Array<{ id: string; name: string }>;
+      const items = JSON.parse(content) as Array<{ id: string }>;
 
-      // tarkov.dev uses its own item IDs which happen to be BSG _id values
       for (const item of items) {
-        this.itemIndex.set(item.id, item.id);
+        this.itemIndex.add(item.id);
       }
 
       console.log(`  Loaded ${this.itemIndex.size} items from tarkov.dev catalog`);
     } catch {
       console.warn('  Could not load tarkov.dev item catalog');
+    }
+  }
+
+  private async loadMapContainerTypes(): Promise<void> {
+    try {
+      const mapsPath = join(this.context.workDir, 'raw', 'tarkov-dev', 'maps.json');
+      const content = await readFile(mapsPath, 'utf-8');
+      const maps = JSON.parse(content) as Array<{
+        id: string;
+        lootContainers?: Array<{ lootContainer: { id: string } }>;
+      }>;
+
+      for (const map of maps) {
+        const containerTypes = new Set<string>();
+        for (const lc of map.lootContainers || []) {
+          containerTypes.add(lc.lootContainer.id);
+        }
+        this.mapContainerTypes.set(map.id, containerTypes);
+      }
+    } catch {
+      // OK — uniform prior fallback won't fire
     }
   }
 
@@ -129,57 +130,83 @@ export class LootNormalizer {
     const containers: Record<string, { items: LootItem[] }> = {};
     const looseRegions: LootProbabilities['maps'][string]['loose_loot_regions'] = [];
 
-    // Process loose loot
+    // 1. Process looseLoot.json (per brief §4.2 step 2)
     try {
-      const looseLootPath = join(mapPath, 'looseLoot.json');
-      const content = await readFile(looseLootPath, 'utf-8');
-      const data = JSON.parse(content) as SPTLooseLootData;
+      const content = await readFile(join(mapPath, 'looseLoot.json'), 'utf-8');
+      const data = JSON.parse(content);
 
-      const spawnpoints = data.spawnpoints || data.looseLoot || [];
-      for (const point of spawnpoints) {
-        if (!point.itemDistribution || point.itemDistribution.length === 0) continue;
+      if (data._meta?.placeholder) {
+        // Skip placeholder data
+      } else {
+        const spawnpoints = data.spawnpoints || data.spawnpointsForced || [];
+        for (const point of spawnpoints) {
+          if (!point.itemDistribution || point.itemDistribution.length === 0) continue;
 
-        const normalizedItems = this.normalizeDistribution(point.itemDistribution);
-        looseRegions.push({
-          region_id: point.template || `region-${looseRegions.length}`,
-          center: point.position || { x: 0, y: 0, z: 0 },
-          radius: 1.0,
-          items: normalizedItems,
-        });
+          looseRegions.push({
+            region_id: point.template || `region-${looseRegions.length}`,
+            center: point.position || { x: 0, y: 0, z: 0 },
+            radius: 1.0,
+            items: this.normalizeDistribution(point.itemDistribution),
+          });
+        }
       }
-    } catch {
-      // No loose loot data for this map
-    }
+    } catch { /* no loose loot data */ }
 
-    // Process static loot
+    // 2. Process staticLoot.json (per brief §4.2 step 1 — separate file)
     try {
-      const staticLootPath = join(mapPath, 'looseLoot.json');
-      const content = await readFile(staticLootPath, 'utf-8');
-      const data = JSON.parse(content) as SPTStaticLootData;
+      const content = await readFile(join(mapPath, 'staticLoot.json'), 'utf-8');
+      const data = JSON.parse(content);
 
-      if (data.staticLoot) {
-        for (const [containerType, containerData] of Object.entries(data.staticLoot)) {
-          if (containerData.itemDistribution && containerData.itemDistribution.length > 0) {
+      if (!data._meta?.placeholder) {
+        // staticLoot.json maps container type IDs to their item distributions
+        for (const [containerType, containerData] of Object.entries(data)) {
+          const cd = containerData as { itemDistribution?: SPTDistributionEntry[] };
+          if (cd.itemDistribution && cd.itemDistribution.length > 0) {
             containers[containerType] = {
-              items: this.normalizeDistribution(containerData.itemDistribution),
+              items: this.normalizeDistribution(cd.itemDistribution),
             };
           }
         }
       }
+    } catch { /* no static loot data */ }
 
-      if (data.staticContainers) {
+    // 3. Process staticContainers.json (per brief §3 — separate file)
+    try {
+      const content = await readFile(join(mapPath, 'staticContainers.json'), 'utf-8');
+      const data = JSON.parse(content);
+
+      if (!data._meta?.placeholder && data.staticContainers) {
         for (const container of data.staticContainers) {
-          const typeId = container.containerTypeId || container.containerId || 'unknown';
+          const typeId = container.containerTypeId || container.containerId;
+          if (!typeId) continue;
           const dist = container.itemDistribution || container.items || [];
-          if (dist.length > 0) {
+          if (dist.length > 0 && !containers[typeId]) {
             containers[typeId] = {
               items: this.normalizeDistribution(dist),
             };
           }
         }
       }
-    } catch {
-      // No static loot data for this map
+    } catch { /* no static containers data */ }
+
+    // 4. Uniform prior fallback (per brief §4.2 step 4)
+    if (this.context.config.loot_probability.uniform_prior_fallback_enabled) {
+      const apiContainers = this.mapContainerTypes.get(mapId);
+      if (apiContainers) {
+        for (const containerTypeId of apiContainers) {
+          if (!containers[containerTypeId]) {
+            // No SPT data for this container type — emit uniform prior
+            const itemCount = this.itemIndex.size || 1;
+            containers[containerTypeId] = {
+              items: [{
+                item_id: 'uniform_prior_placeholder',
+                probability: 1.0 / itemCount,
+                confidence: 'uniform_prior' as LootConfidence,
+              }],
+            };
+          }
+        }
+      }
     }
 
     return {
@@ -188,29 +215,18 @@ export class LootNormalizer {
     };
   }
 
-  private normalizeDistribution(
-    distribution: Array<{ tpl: string; relativeProbability: number }>
-  ): LootItem[] {
+  private normalizeDistribution(distribution: SPTDistributionEntry[]): LootItem[] {
     const totalWeight = distribution.reduce((sum, item) => sum + item.relativeProbability, 0);
-
     if (totalWeight === 0) return [];
 
-    return distribution.map(item => {
-      const tarkovDevId = this.itemIndex.has(item.tpl) ? item.tpl : item.tpl;
-      const confidence: LootConfidence = this.itemIndex.has(item.tpl)
-        ? 'spt_direct'
-        : 'id_unmatched';
-
-      return {
-        item_id: tarkovDevId,
-        probability: item.relativeProbability / totalWeight,
-        confidence,
-      };
-    });
+    return distribution.map(item => ({
+      item_id: item.tpl,
+      probability: item.relativeProbability / totalWeight,
+      confidence: (this.itemIndex.has(item.tpl) ? 'spt_direct' : 'id_unmatched') as LootConfidence,
+    }));
   }
 
   private async getGamePatch(): Promise<string> {
-    // Try to determine game patch from source data
     try {
       const versionsPath = join(this.context.workDir, 'raw', 'source-versions.json');
       const content = await readFile(versionsPath, 'utf-8');
