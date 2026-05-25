@@ -20,7 +20,7 @@
     "layer_aware_matching": true
   },
   "llm": {
-    "enabled": false,
+    "enabled": true,
     "prompt_template_path": "src/llm/prompts/quest-enrichment.md",
     "expected_schema_path": "src/schemas/quest-enhancements.schema.json"
   },

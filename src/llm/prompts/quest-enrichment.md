@@ -21,7 +21,7 @@ Given a quest objective description, extract all applicable constraint axes into
   "distance_min_m": <number> | null,
   "distance_max_m": <number> | null,
   "time_of_day": "day" | "night" | null,
-  "shot_type": "headshot" | "legshot" | null,
+  "shot_type": "headshot" | null,
   "health_state": "<state>" | null,
   "required_keys": []
 }
@@ -33,15 +33,15 @@ Given a quest objective description, extract all applicable constraint axes into
 2. **zone**: Named zone within a map (e.g., "ZoneDorms", "ZoneOLI").
 3. **body_parts**: Body part restrictions for kill objectives.
 4. **weapon_specific_item**: A specific weapon item ID requirement.
-5. **weapon_class**: Weapon class restriction (e.g., "Assault rifle", "Shotgun", "Sniper rifle", "Marksman rifle", "SMG", "Pistol", "Grenade launcher", "Melee").
-6. **weapon_mods_required**: Required weapon modifications.
+5. **weapon_class**: Weapon class restriction (e.g., "Assault rifle", "Shotgun", "Sniper rifle", "Marksman rifle", "SMG", "Pistol", "Grenade launcher", "Melee", "Bolt-action rifle").
+6. **weapon_mods_required**: Required weapon modifications (e.g., "iron sights", specific suppressor).
 7. **wearing_required**: Equipment the player must wear.
 8. **not_wearing**: Equipment the player must NOT wear (e.g., "no armor").
-9. **distance_min_m**: Minimum engagement distance in meters.
-10. **distance_max_m**: Maximum engagement distance in meters.
+9. **distance_min_m**: Minimum engagement distance in meters ("from over X meters").
+10. **distance_max_m**: Maximum engagement distance in meters ("from less than X meters").
 11. **time_of_day**: Time restriction ("day" or "night").
 12. **shot_type**: Specific shot type requirement.
-13. **health_state**: Health state requirement (e.g., "broken_leg", "dehydrated").
+13. **health_state**: Health state requirement (e.g., "pain", "broken_leg", "dehydrated").
 14. **required_keys**: Keys needed to access the objective location.
 
 ## Rules
@@ -50,25 +50,27 @@ Given a quest objective description, extract all applicable constraint axes into
 - Set fields to `null` when not applicable.
 - Use empty arrays `[]` for list fields when not applicable.
 - If the text mentions "any map" or doesn't specify a map, set maps to `null`.
-- For distance constraints like "from more than 50 meters", set `distance_min_m: 50`.
+- For distance constraints like "from over 40 meters", set `distance_min_m: 40`.
+- For distance constraints like "from less than 25 meters", set `distance_max_m: 25`.
 - Be conservative: only extract what the text clearly states.
 
-## Worked Examples
+## Worked Examples (from real Tarkov quests)
 
-### Example 1: Weapon class + distance constraint
-**Objective text**: "Eliminate 3 PMC operatives while using assault rifles from a distance of over 100 meters on Lighthouse"
-**Output**:
+### Example 1: Weapon class + distance + mod constraint
+**Quest:** The Tarkov Shooter - Part 1 (5bc4776586f774512d07cf05)
+**Objective:** "Eliminate Scavs from over 40 meters away while using a bolt-action rifle with iron sights"
+**Output:**
 ```json
 {
-  "maps": ["5704e4dad2720bb55b8b4567"],
+  "maps": null,
   "zone": null,
   "body_parts": null,
   "weapon_specific_item": null,
-  "weapon_class": "Assault rifle",
-  "weapon_mods_required": [],
+  "weapon_class": "Bolt-action rifle",
+  "weapon_mods_required": ["iron sights"],
   "wearing_required": [],
   "not_wearing": [],
-  "distance_min_m": 100,
+  "distance_min_m": 40,
   "distance_max_m": null,
   "time_of_day": null,
   "shot_type": null,
@@ -77,9 +79,33 @@ Given a quest objective description, extract all applicable constraint axes into
 }
 ```
 
-### Example 2: No constraints (basic kill objective)
-**Objective text**: "Eliminate 5 Scavs"
-**Output**:
+### Example 2: Map + weapon class + body part + shot type
+**Quest:** Spa Tour - Part 1 (5a03153686f77442d90e2171)
+**Objective:** "Eliminate Scavs with headshots while using a 12ga shotgun on Shoreline"
+**Output:**
+```json
+{
+  "maps": ["5704e554d2720bac5b8b456e"],
+  "zone": null,
+  "body_parts": ["Head"],
+  "weapon_specific_item": null,
+  "weapon_class": "Shotgun",
+  "weapon_mods_required": [],
+  "wearing_required": [],
+  "not_wearing": [],
+  "distance_min_m": null,
+  "distance_max_m": null,
+  "time_of_day": null,
+  "shot_type": "headshot",
+  "health_state": null,
+  "required_keys": []
+}
+```
+
+### Example 3: Health state constraint, no map
+**Quest:** The Survivalist Path - Wounded Beast (5d25c81b86f77443e625dd71)
+**Objective:** "Eliminate Scavs while suffering from the pain effect"
+**Output:**
 ```json
 {
   "maps": null,
@@ -94,29 +120,6 @@ Given a quest objective description, extract all applicable constraint axes into
   "distance_max_m": null,
   "time_of_day": null,
   "shot_type": null,
-  "health_state": null,
+  "health_state": "pain",
   "required_keys": []
 }
-```
-
-### Example 3: Map + time of day + body part constraint
-**Objective text**: "Eliminate 4 PMC operatives with headshots during nighttime raids on Customs"
-**Output**:
-```json
-{
-  "maps": ["56f40101d2720b2a4d8b45d6"],
-  "zone": null,
-  "body_parts": ["Head"],
-  "weapon_specific_item": null,
-  "weapon_class": null,
-  "weapon_mods_required": [],
-  "wearing_required": [],
-  "not_wearing": [],
-  "distance_min_m": null,
-  "distance_max_m": null,
-  "time_of_day": "night",
-  "shot_type": "headshot",
-  "health_state": null,
-  "required_keys": []
-}
-```

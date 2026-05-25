@@ -1,5 +1,6 @@
 // Stage 5: Quest structured-field enrichment (LLM stage)
-// Human review gated — outputs a diff document for PR review
+// Only includes quests that need enrichment — consumer app falls back to
+// tarkov.dev structured data for quests not listed here.
 
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
@@ -7,21 +8,11 @@ import {
   QuestEnhancements,
   QuestConstraints,
   QuestObjectiveEnhancement,
-  EnrichmentStatus,
   StageContext,
 } from '../lib/types.js';
 import { callLLM, isLLMConfigured, getLLMModelIdentifier, LLMMessage } from '../llm/client.js';
-import { schemaValidator, initializeSchemas } from '../lib/schema-validator.js';
 
-// Constraint axes from ranking-system-spec §6.4.1
-const CONSTRAINT_AXES = [
-  'maps', 'zone', 'body_parts', 'weapon_specific_item', 'weapon_class',
-  'weapon_mods_required', 'wearing_required', 'not_wearing',
-  'distance_min_m', 'distance_max_m', 'time_of_day', 'shot_type',
-  'health_state', 'required_keys',
-] as const;
-
-// Objective types that may benefit from enrichment
+// Objective types where LLM enrichment adds value
 const ENRICHABLE_TYPES = ['shoot', 'mark', 'plantItem', 'visitPlace', 'extract'];
 
 interface RawTask {
@@ -31,6 +22,7 @@ interface RawTask {
     id: string;
     type: string;
     description: string;
+    optional: boolean;
     maps?: Array<{ id: string; name: string }>;
   }>;
 }
@@ -59,23 +51,28 @@ export class QuestEnricher {
       quests: {},
     };
 
-    // Load task data
     const tasksPath = join(this.context.workDir, 'raw', 'tarkov-dev', 'tasks.json');
     const tasksContent = await readFile(tasksPath, 'utf-8');
     const tasks: RawTask[] = JSON.parse(tasksContent);
 
+    // Filter to quests that actually need enrichment
+    const enrichableTasks = tasks.filter(t => this.needsEnrichment(t));
+    console.log(`  ${enrichableTasks.length} quests need enrichment (of ${tasks.length} total)`);
+
     if (!llmConfigured) {
-      console.log('  LLM not configured, marking all quests as skipped');
-      for (const task of tasks) {
+      console.log('  LLM not configured — extracting deterministic constraints only');
+      for (const task of enrichableTasks) {
         result.quests[task.id] = {
           enrichment_status: 'skipped',
-          objectives: task.objectives.map(obj => ({
-            objective_id: obj.id,
-            constraints: this.extractDeterministicConstraints(obj),
-            source_text: obj.description,
-            reviewed_by: null,
-            reviewed_at: null,
-          })),
+          objectives: task.objectives
+            .filter(obj => ENRICHABLE_TYPES.includes(obj.type))
+            .map(obj => ({
+              objective_id: obj.id,
+              constraints: this.extractDeterministicConstraints(obj),
+              source_text: obj.description,
+              reviewed_by: null,
+              reviewed_at: null,
+            })),
         };
       }
     } else {
@@ -83,58 +80,37 @@ export class QuestEnricher {
       this.promptTemplate = await this.loadPromptTemplate();
 
       const diffEntries: string[] = [];
+      let enriched = 0;
+      let failed = 0;
+      let processed = 0;
 
-      for (const task of tasks) {
-        const needsEnrichment = this.needsEnrichment(task);
+      for (const task of enrichableTasks) {
+        const objectives: QuestObjectiveEnhancement[] = [];
 
-        if (!needsEnrichment) {
-          // Extract what we can deterministically
-          result.quests[task.id] = {
-            enrichment_status: 'complete',
-            objectives: task.objectives.map(obj => ({
-              objective_id: obj.id,
-              constraints: this.extractDeterministicConstraints(obj),
-              source_text: obj.description,
-              reviewed_by: null,
-              reviewed_at: null,
-            })),
-          };
-          continue;
-        }
+        for (const obj of task.objectives) {
+          if (!ENRICHABLE_TYPES.includes(obj.type)) continue;
+          processed++;
+          if (processed % 25 === 0) {
+            console.log(`    Progress: ${processed} objectives processed (${enriched} enriched, ${failed} failed)`);
+          }
 
-        // LLM enrichment
-        try {
-          const objectives: QuestObjectiveEnhancement[] = [];
-
-          for (const obj of task.objectives) {
-            if (!ENRICHABLE_TYPES.includes(obj.type)) {
-              objectives.push({
-                objective_id: obj.id,
-                constraints: this.extractDeterministicConstraints(obj),
-                source_text: obj.description,
-                reviewed_by: null,
-                reviewed_at: null,
-              });
-              continue;
-            }
-
+          try {
             const llmConstraints = await this.enrichObjectiveWithLLM(obj);
 
             if (llmConstraints) {
-              // Merge deterministic data with LLM enrichment
               const deterministicConstraints = this.extractDeterministicConstraints(obj);
-              const mergedConstraints = this.mergeConstraints(deterministicConstraints, llmConstraints);
+              const merged = this.mergeConstraints(deterministicConstraints, llmConstraints);
 
               objectives.push({
                 objective_id: obj.id,
-                constraints: mergedConstraints,
+                constraints: merged,
                 source_text: obj.description,
                 reviewed_by: null,
                 reviewed_at: null,
               });
 
-              // Add diff entry
-              diffEntries.push(this.formatDiffEntry(task, obj, mergedConstraints));
+              diffEntries.push(this.formatDiffEntry(task, obj, merged));
+              enriched++;
             } else {
               objectives.push({
                 objective_id: obj.id,
@@ -143,29 +119,31 @@ export class QuestEnricher {
                 reviewed_by: null,
                 reviewed_at: null,
               });
+              failed++;
             }
-          }
-
-          result.quests[task.id] = {
-            enrichment_status: 'review_pending',
-            objectives,
-          };
-        } catch (error) {
-          console.error(`  Error enriching task ${task.id}: ${error}`);
-          result.quests[task.id] = {
-            enrichment_status: 'schema_invalid',
-            objectives: task.objectives.map(obj => ({
+          } catch (error) {
+            console.error(`    Error on ${task.name}/${obj.id}: ${error}`);
+            objectives.push({
               objective_id: obj.id,
               constraints: this.extractDeterministicConstraints(obj),
               source_text: obj.description,
               reviewed_by: null,
               reviewed_at: null,
-            })),
+            });
+            failed++;
+          }
+        }
+
+        if (objectives.length > 0) {
+          result.quests[task.id] = {
+            enrichment_status: enriched > 0 ? 'review_pending' : 'skipped',
+            objectives,
           };
         }
       }
 
-      // Write diff document for human review
+      console.log(`  Enriched: ${enriched}, Failed/skipped: ${failed}`);
+
       if (diffEntries.length > 0) {
         const diffContent = this.formatDiffDocument(diffEntries);
         await writeFile(join(outputDir, 'quest-enhancements.diff.md'), diffContent);
@@ -182,13 +160,12 @@ export class QuestEnricher {
 
   private needsEnrichment(task: RawTask): boolean {
     return task.objectives.some(obj =>
-      ENRICHABLE_TYPES.includes(obj.type) &&
-      obj.description.length > 0
+      ENRICHABLE_TYPES.includes(obj.type) && obj.description.length > 0
     );
   }
 
   private extractDeterministicConstraints(
-    obj: { id: string; type: string; description: string; maps?: Array<{ id: string; name: string }> }
+    obj: { description: string; maps?: Array<{ id: string }> }
   ): QuestConstraints {
     return {
       maps: obj.maps && obj.maps.length > 0 ? obj.maps.map(m => m.id) : null,
@@ -212,10 +189,7 @@ export class QuestEnricher {
     obj: { id: string; type: string; description: string; maps?: Array<{ id: string; name: string }> }
   ): Promise<QuestConstraints | null> {
     const messages: LLMMessage[] = [
-      {
-        role: 'system',
-        content: this.promptTemplate,
-      },
+      { role: 'system', content: this.promptTemplate },
       {
         role: 'user',
         content: `Extract constraints from this quest objective:\n\nObjective type: ${obj.type}\nDescription: "${obj.description}"${obj.maps ? `\nMaps: ${obj.maps.map(m => `${m.name} (${m.id})`).join(', ')}` : ''}\n\nReturn ONLY the JSON object.`,
@@ -225,22 +199,14 @@ export class QuestEnricher {
     try {
       const response = await callLLM(messages);
       const jsonMatch = response.content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.warn(`    No JSON found in LLM response for objective ${obj.id}`);
-        return null;
-      }
+      if (!jsonMatch) return null;
 
       const constraints = JSON.parse(jsonMatch[0]) as QuestConstraints;
-
-      // Validate the response has the right shape
-      if (!this.validateConstraints(constraints)) {
-        console.warn(`    Invalid constraints from LLM for objective ${obj.id}`);
-        return null;
-      }
+      if (!this.validateConstraints(constraints)) return null;
 
       return constraints;
     } catch (error) {
-      console.warn(`    LLM call failed for objective ${obj.id}: ${error}`);
+      console.warn(`    LLM call failed for ${obj.id}: ${error}`);
       return null;
     }
   }
@@ -249,40 +215,38 @@ export class QuestEnricher {
     if (!constraints || typeof constraints !== 'object') return false;
     const c = constraints as Record<string, unknown>;
 
-    // Verify array fields are arrays (or null where allowed)
-    const arrayFields = ['weapon_mods_required', 'wearing_required', 'not_wearing', 'required_keys'];
-    for (const field of arrayFields) {
+    for (const field of ['weapon_mods_required', 'wearing_required', 'not_wearing', 'required_keys']) {
       if (c[field] !== undefined && !Array.isArray(c[field])) return false;
     }
 
-    // Verify number fields
-    const numFields = ['distance_min_m', 'distance_max_m'];
-    for (const field of numFields) {
+    for (const field of ['distance_min_m', 'distance_max_m']) {
       if (c[field] !== undefined && c[field] !== null && typeof c[field] !== 'number') return false;
     }
 
     return true;
   }
 
-  private mergeConstraints(
-    deterministic: QuestConstraints,
-    llm: QuestConstraints
-  ): QuestConstraints {
-    // Deterministic data takes precedence (e.g., map from structured API data)
+  private mergeConstraints(deterministic: QuestConstraints, llm: QuestConstraints): QuestConstraints {
+    // Normalize LLM output quirks: weapon_class must be string|null, not array
+    let weaponClass = llm.weapon_class;
+    if (Array.isArray(weaponClass)) {
+      weaponClass = weaponClass[0] || null;
+    }
+
     return {
       maps: deterministic.maps || llm.maps,
-      zone: llm.zone,
+      zone: llm.zone ?? null,
       body_parts: llm.body_parts,
-      weapon_specific_item: llm.weapon_specific_item,
-      weapon_class: llm.weapon_class,
+      weapon_specific_item: llm.weapon_specific_item ?? null,
+      weapon_class: typeof weaponClass === 'string' ? weaponClass : null,
       weapon_mods_required: llm.weapon_mods_required || [],
       wearing_required: llm.wearing_required || [],
       not_wearing: llm.not_wearing || [],
-      distance_min_m: llm.distance_min_m ?? null,
-      distance_max_m: llm.distance_max_m ?? null,
-      time_of_day: llm.time_of_day ?? null,
-      shot_type: llm.shot_type ?? null,
-      health_state: llm.health_state ?? null,
+      distance_min_m: typeof llm.distance_min_m === 'number' ? llm.distance_min_m : null,
+      distance_max_m: typeof llm.distance_max_m === 'number' ? llm.distance_max_m : null,
+      time_of_day: typeof llm.time_of_day === 'string' ? llm.time_of_day : null,
+      shot_type: typeof llm.shot_type === 'string' ? llm.shot_type : null,
+      health_state: typeof llm.health_state === 'string' ? llm.health_state : null,
       required_keys: llm.required_keys || [],
     };
   }
@@ -302,12 +266,12 @@ export class QuestEnricher {
     obj: { id: string; description: string },
     constraints: QuestConstraints
   ): string {
-    const activeConstraints = Object.entries(constraints)
+    const active = Object.entries(constraints)
       .filter(([_, v]) => v !== null && (!Array.isArray(v) || v.length > 0))
       .map(([k, v]) => `  - **${k}**: ${JSON.stringify(v)}`)
       .join('\n');
 
-    return `### ${task.name} — Objective ${obj.id}\n\n**Source text:** "${obj.description}"\n\n**Extracted constraints:**\n${activeConstraints || '  (none)'}\n`;
+    return `### ${task.name} — Objective ${obj.id}\n\n**Source text:** "${obj.description}"\n\n**Extracted constraints:**\n${active || '  (none)'}\n`;
   }
 
   private formatDiffDocument(entries: string[]): string {
