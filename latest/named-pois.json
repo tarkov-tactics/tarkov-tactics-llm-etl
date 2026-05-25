@@ -1,0 +1,290 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-05-25T17:34:46.275Z",
+  "maps": {
+    "55f2d3fd4bdc2d5f408b4567": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "55f2d3fd4bdc2d5f408b4567-spawn-1": {
+          "name": "Office Window",
+          "source": "iconic_match"
+        },
+        "55f2d3fd4bdc2d5f408b4567-spawn-2": {
+          "name": "Gate 3",
+          "source": "iconic_match"
+        },
+        "55f2d3fd4bdc2d5f408b4567-spawn-3": {
+          "name": "Cellars",
+          "source": "iconic_match"
+        }
+      }
+    },
+    "56f40101d2720b2a4d8b45d6": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "56f40101d2720b2a4d8b45d6-spawn-1": {
+          "name": "Near Scav Checkpoint",
+          "source": "synthetic"
+        },
+        "56f40101d2720b2a4d8b45d6-spawn-2": {
+          "name": "Near Railroad to Tarkov",
+          "source": "synthetic"
+        },
+        "56f40101d2720b2a4d8b45d6-spawn-3": {
+          "name": "Near Old Gas Station",
+          "source": "synthetic"
+        },
+        "56f40101d2720b2a4d8b45d6-spawn-4": {
+          "name": "Near Railroad to Military Base",
+          "source": "synthetic"
+        }
+      }
+    },
+    "5704e3c2d2720bac5b8b4567": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "5704e3c2d2720bac5b8b4567-spawn-1": {
+          "name": "N of Scav Bunker",
+          "source": "synthetic"
+        },
+        "5704e3c2d2720bac5b8b4567-spawn-2": {
+          "name": "Scav House",
+          "source": "iconic_match"
+        },
+        "5704e3c2d2720bac5b8b4567-spawn-3": {
+          "name": "Near ZB-016",
+          "source": "synthetic"
+        },
+        "5704e3c2d2720bac5b8b4567-spawn-4": {
+          "name": "SE of Bridge V-Ex",
+          "source": "synthetic"
+        }
+      }
+    },
+    "5704e4dad2720bb55b8b4567": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "5704e4dad2720bb55b8b4567-spawn-1": {
+          "name": "S of Hideout Under the Landing Stage",
+          "source": "synthetic"
+        },
+        "5704e4dad2720bb55b8b4567-spawn-2": {
+          "name": "Side Tunnel (Co-Op)",
+          "source": "iconic_match"
+        },
+        "5704e4dad2720bb55b8b4567-spawn-3": {
+          "name": "Armored Train",
+          "source": "iconic_match"
+        },
+        "5704e4dad2720bb55b8b4567-spawn-4": {
+          "name": "Near Path to Shoreline",
+          "source": "synthetic"
+        }
+      }
+    },
+    "5704e554d2720bac5b8b456e": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "5704e554d2720bac5b8b456e-spawn-1": {
+          "name": "E of Railway Bridge",
+          "source": "synthetic"
+        },
+        "5704e554d2720bac5b8b456e-spawn-2": {
+          "name": "NW of Path to Lighthouse",
+          "source": "synthetic"
+        },
+        "5704e554d2720bac5b8b456e-spawn-3": {
+          "name": "SE of Pier Boat",
+          "source": "synthetic"
+        },
+        "5704e554d2720bac5b8b456e-spawn-4": {
+          "name": "Near Mountain Bunker",
+          "source": "synthetic"
+        }
+      }
+    },
+    "5704e5fad2720bc05b8b4567": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "5704e5fad2720bc05b8b4567-spawn-1": {
+          "name": "Near Sewer Manhole",
+          "source": "synthetic"
+        },
+        "5704e5fad2720bc05b8b4567-spawn-2": {
+          "name": "Bunker Hermetic Door Power Switch",
+          "source": "iconic_match"
+        },
+        "5704e5fad2720bc05b8b4567-spawn-3": {
+          "name": "Heating Pipe",
+          "source": "iconic_match"
+        },
+        "5704e5fad2720bc05b8b4567-spawn-4": {
+          "name": "Armored Train",
+          "source": "iconic_match"
+        }
+      }
+    },
+    "5714dbc024597771384a510d": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "5714dbc024597771384a510d-spawn-1": {
+          "name": "Near Hole in the Fence",
+          "source": "synthetic"
+        },
+        "5714dbc024597771384a510d-spawn-2": {
+          "name": "W of Railway Exfil",
+          "source": "synthetic"
+        },
+        "5714dbc024597771384a510d-spawn-3": {
+          "name": "Power Station V-Ex",
+          "source": "iconic_match"
+        },
+        "5714dbc024597771384a510d-spawn-4": {
+          "name": "N of Scav Camp (Co-Op)",
+          "source": "synthetic"
+        }
+      }
+    },
+    "5714dc692459777137212e12": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "5714dc692459777137212e12-spawn-1": {
+          "name": "Near Damaged House",
+          "source": "synthetic"
+        },
+        "5714dc692459777137212e12-spawn-2": {
+          "name": "Near Kamchatskaya Arch",
+          "source": "synthetic"
+        },
+        "5714dc692459777137212e12-spawn-3": {
+          "name": "Near Stylobate Building Elevator",
+          "source": "synthetic"
+        },
+        "5714dc692459777137212e12-spawn-4": {
+          "name": "Near Sewer Manhole",
+          "source": "synthetic"
+        }
+      }
+    },
+    "59fc81d786f774390775787e": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "59fc81d786f774390775787e-spawn-1": {
+          "name": "Office Window",
+          "source": "iconic_match"
+        },
+        "59fc81d786f774390775787e-spawn-2": {
+          "name": "Cellars",
+          "source": "iconic_match"
+        }
+      }
+    },
+    "5b0fc42d86f7744a585f9105": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "5b0fc42d86f7744a585f9105-spawn-1": {
+          "name": "Ventilation Shaft",
+          "source": "iconic_match"
+        },
+        "5b0fc42d86f7744a585f9105-spawn-2": {
+          "name": "Main Elevator Power Button",
+          "source": "iconic_match"
+        },
+        "5b0fc42d86f7744a585f9105-spawn-3": {
+          "name": "Med Elevator Power Button",
+          "source": "iconic_match"
+        },
+        "5b0fc42d86f7744a585f9105-spawn-4": {
+          "name": "Near Main Elevator Call Button",
+          "source": "synthetic"
+        }
+      }
+    },
+    "653e6760052c01c1c805532f": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "653e6760052c01c1c805532f-spawn-1": {
+          "name": "Near Emercom Checkpoint",
+          "source": "synthetic"
+        },
+        "653e6760052c01c1c805532f-spawn-2": {
+          "name": "Near Tartowers Sales Office",
+          "source": "synthetic"
+        },
+        "653e6760052c01c1c805532f-spawn-3": {
+          "name": "SE of Nakatani Basement Stairs",
+          "source": "synthetic"
+        },
+        "653e6760052c01c1c805532f-spawn-4": {
+          "name": "Scav Checkpoint (Co-op)",
+          "source": "iconic_match"
+        }
+      }
+    },
+    "65b8d6f5cdde2479cb2a3125": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "65b8d6f5cdde2479cb2a3125-spawn-1": {
+          "name": "Near Emercom Checkpoint",
+          "source": "synthetic"
+        },
+        "65b8d6f5cdde2479cb2a3125-spawn-2": {
+          "name": "Near Tartowers Sales Office",
+          "source": "synthetic"
+        },
+        "65b8d6f5cdde2479cb2a3125-spawn-3": {
+          "name": "SE of Nakatani Basement Stairs",
+          "source": "synthetic"
+        },
+        "65b8d6f5cdde2479cb2a3125-spawn-4": {
+          "name": "Scav Checkpoint (Co-op)",
+          "source": "iconic_match"
+        }
+      }
+    },
+    "6733700029c367a3d40b02af": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "6733700029c367a3d40b02af-spawn-1": {
+          "name": "Shotgun Trap Switch",
+          "source": "iconic_match"
+        },
+        "6733700029c367a3d40b02af-spawn-2": {
+          "name": "Fire Trap Switch",
+          "source": "iconic_match"
+        },
+        "6733700029c367a3d40b02af-spawn-3": {
+          "name": "Toxic Pool Trap Switch",
+          "source": "iconic_match"
+        }
+      }
+    },
+    "68236e8153654e8c1200798a": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "68236e8153654e8c1200798a-spawn-1": {
+          "name": "Spawn Area 1",
+          "source": "synthetic"
+        }
+      }
+    },
+    "6925a2c38bdebd9e2302692e": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "6925a2c38bdebd9e2302692e-spawn-1": {
+          "name": "Spawn Area 1",
+          "source": "synthetic"
+        }
+      }
+    },
+    "69af492a4819ea4ba10a69c5": {
+      "iconic_labels": [],
+      "spawn_cluster_names": {
+        "69af492a4819ea4ba10a69c5-spawn-1": {
+          "name": "Spawn Area 1",
+          "source": "synthetic"
+        }
+      }
+    }
+  }
+}

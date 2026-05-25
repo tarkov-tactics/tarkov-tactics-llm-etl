@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "version": "0.16.5.1.40234+20260525T174931Z",
+  "game_patch": "0.16.5.1.40234",
+  "generated_at": "2026-05-25T17:49:31.544Z",
+  "sources": {
+    "spt_aki_commit": "96e5b73f0f00d0e0a75d83f216bcde0dec387605",
+    "tarkov_dev_query_time": "2026-05-25T17:49:31.544Z",
+    "the_hideout_commit": "ee72cf067a2378fda73d37f0d8ca78223ded204f"
+  },
+  "llm": {
+    "model": "vertex:claude-haiku-4-5@20251001",
+    "stage_5_completed": true
+  },
+  "files": [
+    {
+      "name": "loot-probabilities.json",
+      "sha256": "65a22d93e3fe42e0fc3cd2d24f3d98a2231b3909b84f63a2a664119017989009",
+      "size_bytes": 18834999
+    },
+    {
+      "name": "spawn-clusters.json",
+      "sha256": "5590a88011d8dd83392d4eacac28c67fed7de003f43a254cadceb6c8204ac465",
+      "size_bytes": 393730
+    },
+    {
+      "name": "named-pois.json",
+      "sha256": "d4c779a9a7ea5fa1eaeeac95ffb5e4215ea8826fde305de2cf2de167f8f2bc30",
+      "size_bytes": 8512
+    },
+    {
+      "name": "quest-enhancements.json",
+      "sha256": "86e5d621285a0843e5e8038fc4d9ed2cea2ab08d850c9ce7b4a0cc3ccb1c1706",
+      "size_bytes": 443879
+    }
+  ]
+}
